@@ -19,9 +19,9 @@ use std::{cmp::Ordering, ops::RangeInclusive, sync::Arc};
 
 use ahash::HashMap;
 use egui::{
-    Align2, Color32, CursorIcon, Id, Layout, NumExt as _, PointerButton, Pos2, Rangef, Rect,
-    Response, Sense, Shape, Stroke, TextStyle, Ui, Vec2, Vec2b, WidgetText, epaint, remap_clamp,
-    vec2,
+    Align2, Color32, CursorIcon, Id, Layout, Modifiers, NumExt as _, PointerButton, Pos2, Rangef,
+    Rect, Response, Sense, Shape, Stroke, TextStyle, Ui, Vec2, Vec2b, WidgetText, epaint,
+    remap_clamp, vec2,
 };
 
 pub use crate::{
@@ -167,6 +167,7 @@ pub struct Plot<'a> {
     boxed_zoom_pointer_button: PointerButton,
     linked_axes: Option<(Id, Vec2b)>,
     linked_cursors: Option<(Id, Vec2b)>,
+    skip_zoom_when: Option<Modifiers>,
 
     min_size: Vec2,
     width: Option<f32>,
@@ -218,6 +219,7 @@ impl<'a> Plot<'a> {
             boxed_zoom_pointer_button: PointerButton::Secondary,
             linked_axes: None,
             linked_cursors: None,
+            skip_zoom_when: None,
 
             min_size: Vec2::splat(64.0),
             width: None,
@@ -356,6 +358,21 @@ impl<'a> Plot<'a> {
         T: Into<Vec2b>,
     {
         self.allow_zoom = on.into();
+        self
+    }
+
+    /// Skip zoom when these modifiers are held, allowing custom behaviors.
+    ///
+    /// For example, to reserve Ctrl+Shift+scroll for custom handling:
+    /// ```
+    /// # use egui_plot::Plot;
+    /// # use egui::Modifiers;
+    /// Plot::new("my_plot")
+    ///     .skip_zoom_when(Modifiers::SHIFT);
+    /// ```
+    #[inline]
+    pub fn skip_zoom_when(mut self, modifiers: Modifiers) -> Self {
+        self.skip_zoom_when = Some(modifiers);
         self
     }
 
@@ -852,6 +869,7 @@ impl<'a> Plot<'a> {
             grid_spacing,
             linked_axes,
             linked_cursors,
+            skip_zoom_when,
 
             clamp_grid,
             grid_spacers,
@@ -1281,8 +1299,13 @@ impl<'a> Plot<'a> {
                     zoom_factor.y = 1.0;
                 }
                 if zoom_factor != Vec2::splat(1.0) {
-                    mem.transform.zoom(zoom_factor, hover_pos);
-                    mem.auto_bounds = mem.auto_bounds.and(!allow_zoom);
+                    let should_skip = skip_zoom_when
+                        .map(|skip| ui.input(|i| i.modifiers.contains(skip)))
+                        .unwrap_or(false);
+                    if !should_skip {
+                        mem.transform.zoom(zoom_factor, hover_pos);
+                        mem.auto_bounds = mem.auto_bounds.and(!allow_zoom);
+                    }
                 }
             }
             if allow_scroll.any() {
